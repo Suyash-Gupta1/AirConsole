@@ -1,15 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/Button';
-import { initFirebase } from '../services/firebaseService';
+import { initFirebase, subscribeToRoomList, deleteRoom } from '../services/firebaseService';
 
 export const Home: React.FC = () => {
   const navigate = useNavigate();
   const [roomId, setRoomId] = useState('');
+  const [activeRooms, setActiveRooms] = useState<{ id: string; status: string }[]>([]);
 
   // Initialize Firebase on mount using the hardcoded config in firebaseService.ts
   useEffect(() => {
       initFirebase(); 
+      
+      // Subscribe to the list of available rooms
+      const unsubscribe = subscribeToRoomList((rooms) => {
+        setActiveRooms(rooms);
+      });
+
+      return () => unsubscribe();
   }, []);
 
   const handleJoin = () => {
@@ -17,9 +25,20 @@ export const Home: React.FC = () => {
     navigate(`/controller/${roomId.toUpperCase()}`);
   };
 
+  const handleJoinSpecific = (id: string) => {
+      navigate(`/controller/${id}`);
+  };
+
+  const handleDelete = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    if(window.confirm(`Delete room ${id}?`)) {
+        deleteRoom(id);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 relative">
-      <div className="max-w-md w-full text-center space-y-12">
+      <div className="max-w-md w-full text-center space-y-12 z-10">
         <div className="space-y-4">
             <h1 className="text-6xl font-black italic tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600 drop-shadow-[0_0_15px_rgba(6,182,212,0.5)]">
             AIR CONSOLE
@@ -55,9 +74,39 @@ export const Home: React.FC = () => {
                </div>
             </div>
              
-             <p className="text-xs text-slate-600">
-                You can also use your system camera app to scan the QR code on the Host screen.
-             </p>
+             {/* Active Rooms Manager */}
+             {activeRooms.length > 0 && (
+                 <div className="mt-8">
+                    <p className="text-xs text-slate-600 mb-2 uppercase tracking-widest">Active Sessions ({activeRooms.length})</p>
+                    <div className="bg-slate-900 border border-slate-800 rounded-lg overflow-hidden max-h-48 overflow-y-auto">
+                        {activeRooms.map(room => (
+                            <div 
+                                key={room.id} 
+                                onClick={() => handleJoinSpecific(room.id)}
+                                className="flex items-center justify-between p-3 border-b border-slate-800 hover:bg-slate-800/50 cursor-pointer transition-colors group"
+                            >
+                                <div className="flex items-center gap-3">
+                                    <span className="font-mono text-cyan-400 font-bold">{room.id}</span>
+                                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${room.status === 'connected' ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'}`}>
+                                        {room.status}
+                                    </span>
+                                </div>
+                                <button 
+                                    onClick={(e) => handleDelete(e, room.id)}
+                                    className="text-slate-600 hover:text-red-400 p-2 transition-colors"
+                                    title="Delete Room"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M3 6h18"></path>
+                                        <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
+                                        <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                 </div>
+             )}
         </div>
       </div>
     </div>

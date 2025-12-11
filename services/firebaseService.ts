@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
-import { getDatabase, ref, set, onValue, onDisconnect, Database, off } from 'firebase/database';
+import { getDatabase, ref, set, onValue, onDisconnect, Database, off, remove } from 'firebase/database';
 import { ControllerData, FirebaseConfig } from '../types';
 
 let app: FirebaseApp | undefined;
@@ -67,6 +67,43 @@ export const subscribeToRoom = (roomId: string, onData: (data: ControllerData) =
     unsubscribe();
     off(roomRef);
   };
+};
+
+export const subscribeToRoomList = (onData: (rooms: { id: string; status: string }[]) => void) => {
+  if (!db) initFirebase();
+  if (!db) return () => {};
+
+  const roomsRef = ref(db, 'rooms');
+  
+  const unsubscribe = onValue(roomsRef, (snapshot) => {
+    const data = snapshot.val();
+    if (data) {
+      // Convert Object { "ID": { ... } } to Array [ { id: "ID", ... } ]
+      const roomList = Object.keys(data).map(key => ({
+        id: key,
+        status: data[key].status || 'unknown'
+      }));
+      onData(roomList);
+    } else {
+      onData([]);
+    }
+  });
+
+  return () => {
+    unsubscribe();
+    off(roomsRef);
+  };
+};
+
+export const deleteRoom = async (roomId: string) => {
+  if (!db) initFirebase();
+  if (!db) return;
+  
+  try {
+    await remove(ref(db, `rooms/${roomId}`));
+  } catch (e) {
+    console.error("Error deleting room:", e);
+  }
 };
 
 // Throttle configuration
