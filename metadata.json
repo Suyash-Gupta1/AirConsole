@@ -1,0 +1,5 @@
+{
+  "name": "Air Console",
+  "description": "A real-time dual-screen experience turning your phone into a motion controller for a web-based game console.",
+  "requestFramePermissions": []
+}
