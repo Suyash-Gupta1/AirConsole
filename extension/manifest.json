@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Air Console Bridge",
+  "version": "1.0",
+  "description": "Control web games with your phone via Air Console.",
+  "host_permissions": ["<all_urls>"],
+  "permissions": ["activeTab", "scripting"],
+  "action": {
+    "default_popup": "popup.html"
+  }
+}

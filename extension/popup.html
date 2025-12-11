@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { width: 300px; padding: 15px; background: #0f172a; color: white; font-family: sans-serif; }
+    input { width: 100%; padding: 10px; margin-bottom: 10px; background: #1e293b; border: 1px solid #334155; color: white; }
+    button { width: 100%; padding: 10px; background: #06b6d4; border: none; font-weight: bold; cursor: pointer; }
+    button:hover { background: #22d3ee; }
+    .status { margin-top: 10px; font-size: 12px; color: #94a3b8; }
+  </style>
+</head>
+<body>
+  <h3>🏎️ Air Console Connect</h3>
+  <input type="text" id="roomId" placeholder="Enter Room ID (e.g. 81FZ)" />
+  <button id="connectBtn">Connect to Game Page</button>
+  <div class="status" id="status">Status: Disconnected</div>
+  <script src="popup.js"></script>
+</body>
+</html>
