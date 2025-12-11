@@ -8,6 +8,7 @@ export const ControllerView: React.FC = () => {
   const [permissionGranted, setPermissionGranted] = useState(false);
   const [error, setError] = useState<string>('');
   const [isBoosting, setIsBoosting] = useState(false);
+  const [debugInfo, setDebugInfo] = useState({ x: 0, y: 0, updates: 0 });
 
   // iOS 13+ requires a user interaction to request permission
   const requestAccess = async () => {
@@ -36,6 +37,13 @@ export const ControllerView: React.FC = () => {
     const x = Math.min(Math.max(event.gamma || 0, -60), 60); 
     const y = Math.min(Math.max(event.beta || 0, -60), 60);
 
+    // Update debug info occasionally (every ~10 frames) to avoid too many re-renders
+    setDebugInfo(prev => ({
+        x: Math.round(x),
+        y: Math.round(y),
+        updates: prev.updates + 1
+    }));
+
     sendControllerData(roomId, {
       x: Math.round(x),
       y: Math.round(y),
@@ -58,15 +66,33 @@ export const ControllerView: React.FC = () => {
     setIsBoosting(true);
     // Send immediate update to avoid throttle lag for button presses
     if(roomId) {
-        // We pass 0,0 temporarily, real logic might cache last known pos
-        // But the next throttle tick will correct position quickly
-        // Ideally sendControllerData handles state merging or we keep a ref to last orientation
+        sendControllerData(roomId, {
+            x: debugInfo.x,
+            y: debugInfo.y,
+            isBoosting: true,
+            timestamp: Date.now()
+        });
     }
   };
 
   const handleBoostEnd = () => setIsBoosting(false);
 
+  // Check for HTTP
+  const isHttp = window.location.protocol === 'http:' && window.location.hostname !== 'localhost';
+
   if (!roomId) return <div className="p-8 text-white">Invalid Room ID</div>;
+
+  if (isHttp) {
+    return (
+        <div className="min-h-screen bg-red-900/20 flex flex-col items-center justify-center p-8 text-center text-white">
+            <h1 className="text-2xl font-bold text-red-500 mb-4">CONNECTION ERROR</h1>
+            <p>Motion sensors are blocked on insecure connections.</p>
+            <p className="mt-4 text-sm bg-black/50 p-2 rounded">
+                Please use <b>HTTPS</b> (e.g., via ngrok) to access this page on your phone.
+            </p>
+        </div>
+    );
+  }
 
   if (!permissionGranted) {
     return (
@@ -87,6 +113,14 @@ export const ControllerView: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col relative overflow-hidden select-none touch-none">
       
+      {/* Debug Overlay */}
+      <div className="absolute top-2 left-2 z-50 text-[10px] font-mono text-slate-500 bg-black/50 p-1 rounded pointer-events-none">
+        X: {debugInfo.x}° <br/>
+        Y: {debugInfo.y}° <br/>
+        UP: {debugInfo.updates} <br/>
+        BOOST: {isBoosting ? 'ON' : 'OFF'}
+      </div>
+
       {/* Background decoration */}
       <div className="absolute inset-0 flex items-center justify-center opacity-10 pointer-events-none">
         <div className="w-64 h-64 border-[20px] border-cyan-500 rounded-full"></div>
@@ -101,8 +135,16 @@ export const ControllerView: React.FC = () => {
         <div className="w-64 h-64 border border-slate-700 rounded-full relative flex items-center justify-center bg-slate-900/50 backdrop-blur">
             <div className="text-slate-500 text-xs font-mono absolute top-4">TILT PHONE</div>
             <div className="w-2 h-2 bg-cyan-500 rounded-full shadow-[0_0_10px_#06b6d4]"></div>
-            <div className="absolute w-full h-[1px] bg-slate-800"></div>
-            <div className="absolute h-full w-[1px] bg-slate-800"></div>
+            
+            {/* Visual Tilt Indicator */}
+            <div 
+                className="absolute w-full h-1 bg-cyan-500/30 transition-transform duration-100"
+                style={{ transform: `rotate(${debugInfo.x}deg)` }}
+            ></div>
+            <div 
+                className="absolute h-full w-1 bg-cyan-500/30 transition-transform duration-100"
+                style={{ transform: `rotate(${debugInfo.y}deg)` }}
+            ></div>
         </div>
 
         <div className="w-full max-w-xs">

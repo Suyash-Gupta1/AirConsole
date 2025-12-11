@@ -5,7 +5,7 @@ import { ControllerData, FirebaseConfig } from '../types';
 let app: FirebaseApp | undefined;
 let db: Database | undefined;
 
-// Default config placeholder
+// Default config placeholder - The user has likely replaced this with real values
 const DEFAULT_CONFIG: FirebaseConfig = {
   apiKey: "AIzaSyDHUDVReOWGhKwTy9KoAiHHHCrGSQKJPfI",
   authDomain: "airconsole-1ce52.firebaseapp.com",
@@ -17,6 +17,9 @@ const DEFAULT_CONFIG: FirebaseConfig = {
 };
 
 export const initFirebase = (config: FirebaseConfig = DEFAULT_CONFIG) => {
+  // If already initialized, skip
+  if (db) return true;
+
   try {
     if (!getApps().length) {
       app = initializeApp(config);
@@ -36,9 +39,18 @@ export const generateRoomId = () => {
 };
 
 export const subscribeToRoom = (roomId: string, onData: (data: ControllerData) => void) => {
-  if (!db) return () => {};
+  // Lazy init: If the view loads before App.tsx useEffect, ensure DB is ready
+  if (!db) {
+    initFirebase();
+    if (!db) {
+        console.error("Failed to initialize Firebase in subscribeToRoom");
+        return () => {};
+    }
+  }
   
+  console.log(`Subscribing to room: ${roomId}`);
   const roomRef = ref(db, `rooms/${roomId}/controller`);
+  
   const unsubscribe = onValue(roomRef, (snapshot) => {
     const data = snapshot.val();
     if (data) {
@@ -62,6 +74,9 @@ const THROTTLE_MS = 50;
 let lastUpdate = 0;
 
 export const sendControllerData = (roomId: string, data: ControllerData) => {
+  if (!db) {
+    initFirebase();
+  }
   if (!db) return;
 
   const now = Date.now();

@@ -58,6 +58,7 @@ export const HostView: React.FC = () => {
   };
 
   const controllerUrl = `${window.location.origin}/#/controller/${roomId}`;
+  const isConnected = data.timestamp > 0;
 
   return (
     <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-4 relative overflow-hidden">
@@ -88,8 +89,13 @@ export const HostView: React.FC = () => {
           <h2 className="text-2xl font-bold mb-2 tracking-tighter text-cyan-400">JOIN GAME</h2>
           <p className="text-slate-400 mb-6 text-sm text-center">Scan with your phone to connect</p>
           
-          <div className="p-4 bg-white rounded-lg">
+          <div className="p-4 bg-white rounded-lg relative">
             <QRCode value={controllerUrl} size={180} />
+            {isConnected && !isDemoMode && (
+                <div className="absolute inset-0 bg-white/90 flex items-center justify-center">
+                    <span className="text-green-600 font-bold text-xl rotate-[-12deg] border-4 border-green-600 px-2 rounded-lg">CONNECTED</span>
+                </div>
+            )}
           </div>
           
           <div className="mt-6 flex flex-col items-center">
@@ -103,6 +109,15 @@ export const HostView: React.FC = () => {
           
           {/* Horizon Line */}
           <div className="absolute w-full h-[1px] bg-cyan-500/30 top-1/2 left-0 shadow-[0_0_10px_rgba(6,182,212,0.5)]"></div>
+
+          {/* Connection Status Overlay */}
+          {!isConnected && !isDemoMode && (
+              <div className="absolute top-4 left-0 w-full text-center z-20">
+                  <div className="inline-block px-4 py-1 rounded-full bg-yellow-500/20 text-yellow-200 border border-yellow-500/50 text-xs font-mono animate-pulse">
+                      WAITING FOR CONTROLLER...
+                  </div>
+              </div>
+          )}
 
           {/* The Ship / Object */}
           <div 
