@@ -16,7 +16,7 @@ export const ControllerView: React.FC = () => {
   // Track initial offset to "Zero" the steering when we start
   const baseOffset = useRef({ x: 0, set: false });
 
-  // Track digital input state
+  // Track digital input state (0 for stop, -60 for left, 60 for right)
   const digitalState = useRef({ x: 0 });
 
   const requestAccess = async () => {
@@ -39,45 +39,57 @@ export const ControllerView: React.FC = () => {
   const handleOrientation = useCallback((event: DeviceOrientationEvent) => {
     if (!roomId || controlMode === 'touch') return;
     
-    // DETECT ORIENTATION (Landscape vs Portrait)
+    // Check screen width to determine orientation
     const isLandscape = window.innerWidth > window.innerHeight;
     
     let rawX = 0;
     let rawY = 0;
+    let currentOrientation: 'portrait' | 'landscape' = isLandscape ? 'landscape' : 'portrait';
 
     if (isLandscape) {
         // LANDSCAPE MODE (Steering Wheel)
-        // Beta is tilt front/back, Gamma is left/right. 
-        // In landscape, Beta becomes our steering axis.
+        // Beta is the axis for front/back tilt (pitch).
+        // Gamma is the axis for left/right roll.
+        
+        // Use Beta for steering (like a wheel)
         rawX = event.beta || 0;
         rawY = event.gamma || 0;
         
-        // Handle screen rotation (90 vs -90 degrees)
-        // If the home button is on the right vs left, the values invert
-        // We can infer this roughly or just clamp. For now, we assume standard landscape.
+        // Correct for 180-degree rotation if the phone is flipped (e.g., home button left vs right)
+        // This relies on the internal window.orientation API, which helps determine the exact rotation.
+        if (window.orientation === 90 || window.orientation === -90) {
+            // Standardizing the base X axis to be relative to the phone's frame
+            if (Math.abs(window.orientation) === 90) {
+                // When in landscape, we often want the axis flipped so tilting 'up' means 'center'
+                // This is a common fix for different browsers/OS
+                rawX = (window.orientation === 90) ? (event.beta || 0) : -(event.beta || 0);
+            }
+        }
     } else {
         // PORTRAIT MODE (TV Remote)
         rawX = event.gamma || 0;
         rawY = event.beta || 0;
     }
 
-    // AUTO-CALIBRATION
+    // --- SENSOR DATA CLEANUP AND CALIBRATION ---
+    
+    // 1. AUTO-CALIBRATION
     if (!baseOffset.current.set && rawX !== 0) {
         baseOffset.current.x = rawX;
         baseOffset.current.set = true;
     }
 
-    // Apply Calibration & Drift Correction
+    // 2. Apply Calibration & Drift Correction (Decay Offset)
     if (baseOffset.current.set) {
-       baseOffset.current.x = baseOffset.current.x * 0.99; // Decay offset
+       baseOffset.current.x = baseOffset.current.x * 0.99; 
        rawX -= baseOffset.current.x;
     }
 
-    // Clamp values (-60 to 60 degrees)
+    // 3. Clamp values (-60 to 60 degrees)
     const x = Math.min(Math.max(rawX, -60), 60); 
     const y = Math.min(Math.max(rawY, -60), 60);
 
-    setDebugInfo({ x: Math.round(x), orientation: isLandscape ? 'landscape' : 'portrait' });
+    setDebugInfo({ x: Math.round(x), orientation: currentOrientation });
 
     sendControllerData(roomId, {
       x: Math.round(x),
@@ -103,15 +115,17 @@ export const ControllerView: React.FC = () => {
     if (controlMode !== 'touch' || !roomId) return;
 
     let targetX = 0;
+    // Set targetX to max tilt value (60) if pressing left/right
     if (direction === 'left') targetX = -60;
     if (direction === 'right') targetX = 60;
+    // If 'stop', targetX remains 0
 
     digitalState.current.x = targetX;
     
     // Update visual debug
     setDebugInfo(prev => ({ ...prev, x: targetX }));
 
-    // Send data
+    // Send data (send immediately on press/release for responsiveness)
     sendControllerData(roomId, {
         x: targetX,
         y: 0,
@@ -123,8 +137,8 @@ export const ControllerView: React.FC = () => {
   const handleBoostStart = () => {
       setIsBoosting(true);
       if (roomId) {
-        // Send immediate update
         const currentX = controlMode === 'touch' ? digitalState.current.x : debugInfo.x;
+        // Send immediate update to overcome throttling in the service layer
         sendControllerData(roomId, {
             x: currentX,
             y: 0,
@@ -136,10 +150,8 @@ export const ControllerView: React.FC = () => {
 
   const handleBoostEnd = () => {
       setIsBoosting(false);
-      // We rely on the next loop/event to send the false state, 
-      // or we can send it immediately if needed, but react state update will trigger a render
-      // For digital mode, we might want to send immediately:
-      if (roomId && controlMode === 'touch') {
+      // Send immediate update for release
+      if (roomId) {
           sendControllerData(roomId, {
               x: digitalState.current.x,
               y: 0,
@@ -246,9 +258,10 @@ export const ControllerView: React.FC = () => {
         <div className="flex-1 flex flex-row items-center justify-between p-4 z-10 gap-4">
             
             {/* D-PAD Area */}
+            {/* We use grid/flex here to keep buttons large for touch targets */}
             <div className="flex-1 flex gap-2 h-full items-center justify-center max-w-[50%]">
                 <button
-                    className="flex-1 h-32 bg-slate-800/80 border-2 border-slate-600 rounded-l-2xl active:bg-cyan-500 active:text-black active:border-cyan-400 transition-colors flex items-center justify-center"
+                    className="flex-1 h-32 bg-slate-800/80 border-2 border-slate-600 rounded-l-2xl active:bg-cyan-500 active:text-black active:border-cyan-400 transition-colors flex items-center justify-center shadow-xl shadow-slate-900/50"
                     onTouchStart={() => handleDigitalSteer('left')}
                     onTouchEnd={() => handleDigitalSteer('stop')}
                     onMouseDown={() => handleDigitalSteer('left')}
@@ -257,7 +270,7 @@ export const ControllerView: React.FC = () => {
                     <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
                 </button>
                 <button
-                    className="flex-1 h-32 bg-slate-800/80 border-2 border-slate-600 rounded-r-2xl active:bg-cyan-500 active:text-black active:border-cyan-400 transition-colors flex items-center justify-center"
+                    className="flex-1 h-32 bg-slate-800/80 border-2 border-slate-600 rounded-r-2xl active:bg-cyan-500 active:text-black active:border-cyan-400 transition-colors flex items-center justify-center shadow-xl shadow-slate-900/50"
                     onTouchStart={() => handleDigitalSteer('right')}
                     onTouchEnd={() => handleDigitalSteer('stop')}
                     onMouseDown={() => handleDigitalSteer('right')}
@@ -271,11 +284,11 @@ export const ControllerView: React.FC = () => {
             <div className="flex-1 flex items-center justify-center h-full max-w-[40%]">
                 <button
                     className={`
-                        w-full h-32 rounded-2xl font-black text-2xl tracking-tighter transition-all duration-75 border-4
+                        w-full h-32 rounded-2xl font-black text-2xl tracking-tighter transition-all duration-75 border-4 shadow-xl
                         flex flex-col items-center justify-center
                         ${isBoosting 
-                            ? 'bg-orange-500 border-orange-400 text-black scale-95' 
-                            : 'bg-slate-800/80 border-slate-600 text-orange-500'
+                            ? 'bg-orange-500 border-orange-400 text-black scale-95 shadow-[0_0_30px_#f97316]' 
+                            : 'bg-slate-800/80 border-slate-600 text-orange-500 shadow-slate-900/50'
                         }
                     `}
                     onTouchStart={handleBoostStart}
