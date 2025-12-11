@@ -7,13 +7,13 @@ let db: Database | undefined;
 
 // Default config placeholder
 const DEFAULT_CONFIG: FirebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "your-app.firebaseapp.com",
-  databaseURL: "https://your-db.firebaseio.com",
-  projectId: "your-project-id",
-  storageBucket: "your-bucket",
-  messagingSenderId: "123456",
-  appId: "1:12345:web:abc"
+  apiKey: "AIzaSyDHUDVReOWGhKwTy9KoAiHHHCrGSQKJPfI",
+  authDomain: "airconsole-1ce52.firebaseapp.com",
+  databaseURL: "https://airconsole-1ce52-default-rtdb.firebaseio.com",
+  projectId: "airconsole-1ce52",
+  storageBucket: "airconsole-1ce52.firebasestorage.app",
+  messagingSenderId: "14111851032",
+  appId: "1:14111851032:web:259d11fe31a626e570796d"
 };
 
 export const initFirebase = (config: FirebaseConfig = DEFAULT_CONFIG) => {

@@ -1,20 +1,114 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Air Console - Setup Guide
 
-# Run and deploy your AI Studio app
+A real-time dual-screen web game where your smartphone acts as the motion controller for a desktop game.
 
-This contains everything you need to run your app locally.
+## 🚀 How to Run Locally
 
-View your app in AI Studio: https://ai.studio/apps/drive/1BUHHAg96nNuR7LdzG5LOsbXZYsFKg6Fv
+Since this project uses modern ES Modules and imports directly from a CDN, you do not need a complex build step (Webpack/Vite is optional). You simply need to serve the files.
 
-## Run Locally
+### 1. Start a Local Server
+Run one of the following commands in the project root:
 
-**Prerequisites:**  Node.js
+**Using Node.js (Recommended):**
+```bash
+npx serve .
+```
+
+**Using Python:**
+```bash
+python3 -m http.server 8000
+```
+
+### 2. The "HTTPS" Requirement (Crucial for Phones)
+Smartphones (especially iPhones) **will not** allow access to the Gyroscope/Accelerometer on `http://` websites. You must use **HTTPS**.
+
+To test this on your phone while developing locally, use **ngrok** to create a secure tunnel:
+
+1. Install ngrok: `brew install ngrok` (or download from ngrok.com).
+2. Run: `ngrok http 3000` (replace 3000 with your local server port).
+3. Open the **https** URL provided by ngrok on your Laptop (Host).
+4. Scan the QR code with your Phone.
+
+---
+
+## 🔥 Firebase Setup (Step-by-Step)
+
+This app requires Firebase Realtime Database to sync the phone movement to the screen.
+
+### Step 1: Create Project
+1. Go to [console.firebase.google.com](https://console.firebase.google.com/).
+2. Click **"Add project"**.
+3. Name it `air-console` (or anything you want).
+4. Disable Google Analytics (not needed for this).
+5. Click **"Create Project"**.
+
+### Step 2: Create Database
+1. In the left sidebar, go to **Build** -> **Realtime Database**.
+2. Click **"Create Database"**.
+3. Choose a location (e.g., United States).
+4. **Security Rules:** Start in **Test Mode** (allows read/write).
+   * Or select **Locked Mode** and see Step 3 below.
+
+### Step 3: Configure Rules
+Go to the **Rules** tab in Realtime Database and paste this to allow anyone to join a game (for development):
+
+```json
+{
+  "rules": {
+    "rooms": {
+      ".read": true,
+      ".write": true,
+      // Optional: Cleanup old data automatically
+      "$roomId": {
+        ".validate": "newData.hasChildren(['timestamp']) || !newData.exists()"
+      }
+    }
+  }
+}
+```
+
+### Step 4: Get API Keys
+1. Click the **Gear Icon** (Project Settings) next to "Project Overview" in the top left.
+2. Scroll down to **"Your apps"**.
+3. Click the **Web (`</>`)** icon.
+4. Register app (name it "Web").
+5. **Copy the `firebaseConfig` object.** It looks like this:
+
+```javascript
+const firebaseConfig = {
+  apiKey: "AIzaSyD...",
+  authDomain: "project-id.firebaseapp.com",
+  databaseURL: "https://project-id-default-rtdb.firebaseio.com",
+  projectId: "project-id",
+  storageBucket: "project-id.firebasestorage.app",
+  messagingSenderId: "...",
+  appId: "..."
+};
+```
+
+### Step 5: Connect App
+1. Open your app in the browser.
+2. On the Home screen, click the **Gear Icon** (Settings) in the top right.
+3. Paste the JSON object you copied above.
+4. Click **"Save & Connect"**.
+
+If successful, you can now click "HOST A GAME" and scan the QR code!
 
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+// Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
+
+// Your web app's Firebase configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyDHUDVReOWGhKwTy9KoAiHHHCrGSQKJPfI",
+  authDomain: "airconsole-1ce52.firebaseapp.com",
+  projectId: "airconsole-1ce52",
+  storageBucket: "airconsole-1ce52.firebasestorage.app",
+  messagingSenderId: "14111851032",
+  appId: "1:14111851032:web:259d11fe31a626e570796d"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
