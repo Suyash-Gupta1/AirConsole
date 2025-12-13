@@ -22,6 +22,8 @@ export const ControllerView: React.FC = () => {
   const touchInput = useRef({
     left: false,
     right: false,
+    up: false,   // Added UP
+    down: false, // Added DOWN
   });
 
   const requestAccess = async () => {
@@ -84,16 +86,15 @@ export const ControllerView: React.FC = () => {
     }
     
     // 3. Clamp values (-60 to 60 degrees is safe for input range)
-    // Removed rounding to keep precision
     const x = Math.min(Math.max(rawX, -60), 60); 
     const y = Math.min(Math.max(rawY, -60), 60);
 
     setDebugInfo({ x: Math.round(x), y: Math.round(y), orientation: currentOrientation });
 
     sendControllerData(roomId, {
-      x: x, // Send float value for precision
+      x: x, 
       y: y, 
-      isBoosting: isBoosting, // Use local state for boost
+      isBoosting: isBoosting, 
       timestamp: Date.now()
     });
   }, [roomId, isBoosting, controlMode]);
@@ -115,20 +116,22 @@ export const ControllerView: React.FC = () => {
     if (controlMode !== 'touch' || !roomId) return;
 
     const interval = setInterval(() => {
-      const { left, right } = touchInput.current;
+      const { left, right, up, down } = touchInput.current;
       
       let x = 0;
-      const MAX_DIGITAL_TILT = 60; // Max signal sent for digital press
+      let y = 0;
+      const MAX_DIGITAL_TILT = 60; 
 
       // Steering (X)
       if (left) x = -MAX_DIGITAL_TILT;
-      if (right) x = MAX_DIGITAL_TILT;
+      else if (right) x = MAX_DIGITAL_TILT; // Else ensures instant release to 0 if neither is pressed
       
-      // Y axis is always 0 in digital steering mode (we assume the game handles acceleration via boost/W)
-      const y = 0; 
+      // Vertical (Y)
+      if (up) y = -MAX_DIGITAL_TILT; // Up is often negative in games (forward)
+      else if (down) y = MAX_DIGITAL_TILT; // Down is positive (back)
 
       sendControllerData(roomId, {
-        x, // -60, 0, or 60
+        x, 
         y, 
         isBoosting: isBoosting,
         timestamp: Date.now()
@@ -141,24 +144,42 @@ export const ControllerView: React.FC = () => {
     return () => clearInterval(interval);
   }, [controlMode, roomId, isBoosting]);
 
-  const handleDigitalSteer = (direction: 'left' | 'right' | 'stop') => {
-      if (direction === 'stop') {
+  const handleDigitalSteer = (direction: 'left' | 'right' | 'up' | 'down' | 'stop-x' | 'stop-y') => {
+      // Logic: As soon as we call 'stop', clear the flags immediately.
+      // The useEffect loop will pick this up on the next 50ms cycle and send 0.
+      
+      if (direction === 'stop-x') {
           touchInput.current.left = false;
           touchInput.current.right = false;
-      } else if (direction === 'left') {
+      } else if (direction === 'stop-y') {
+          touchInput.current.up = false;
+          touchInput.current.down = false;
+      } 
+      
+      else if (direction === 'left') {
           touchInput.current.left = true;
           touchInput.current.right = false;
       } else if (direction === 'right') {
           touchInput.current.right = true;
           touchInput.current.left = false;
       }
+      
+      else if (direction === 'up') {
+          touchInput.current.up = true;
+          touchInput.current.down = false;
+      } else if (direction === 'down') {
+          touchInput.current.down = true;
+          touchInput.current.up = false;
+      }
   };
 
   const handleBoostStart = () => {
       setIsBoosting(true);
-      // Immediately send the boost signal to override throttle for responsiveness
       if (roomId) {
-        const currentX = controlMode === 'touch' ? (touchInput.current.left ? -60 : (touchInput.current.right ? 60 : 0)) : debugInfo.x;
+        // Calculate current X based on touch state to send with boost
+        const { left, right } = touchInput.current;
+        const currentX = controlMode === 'touch' ? (left ? -60 : (right ? 60 : 0)) : debugInfo.x;
+        
         sendControllerData(roomId, {
             x: currentX,
             y: 0,
@@ -170,9 +191,10 @@ export const ControllerView: React.FC = () => {
 
   const handleBoostEnd = () => {
       setIsBoosting(false);
-      // Immediately send the boost signal OFF
       if (roomId) {
-          const currentX = controlMode === 'touch' ? (touchInput.current.left ? -60 : (touchInput.current.right ? 60 : 0)) : debugInfo.x;
+          const { left, right } = touchInput.current;
+          const currentX = controlMode === 'touch' ? (left ? -60 : (right ? 60 : 0)) : debugInfo.x;
+          
           sendControllerData(roomId, {
               x: currentX,
               y: 0,
@@ -203,14 +225,14 @@ export const ControllerView: React.FC = () => {
   }
 
   // Helper for D-Pad Buttons
-  const DPadBtn = ({ dir, icon, className = "" }: { dir: 'left' | 'right', icon: React.ReactNode, className?: string }) => (
+  const DPadBtn = ({ dir, axis, icon, className = "" }: { dir: 'left' | 'right' | 'up' | 'down', axis: 'x' | 'y', icon: React.ReactNode, className?: string }) => (
     <button
         className={`bg-slate-800 border-2 border-slate-600 rounded-xl active:bg-cyan-600 active:border-cyan-400 active:text-white text-slate-400 transition-colors flex items-center justify-center shadow-lg active:scale-95 ${className}`}
         onTouchStart={(e) => { e.preventDefault(); handleDigitalSteer(dir); }}
-        onTouchEnd={(e) => { e.preventDefault(); handleDigitalSteer('stop'); }}
+        onTouchEnd={(e) => { e.preventDefault(); handleDigitalSteer(axis === 'x' ? 'stop-x' : 'stop-y'); }}
         onMouseDown={() => handleDigitalSteer(dir)}
-        onMouseUp={() => handleDigitalSteer('stop')}
-        onMouseLeave={() => handleDigitalSteer('stop')}
+        onMouseUp={() => handleDigitalSteer(axis === 'x' ? 'stop-x' : 'stop-y')}
+        onMouseLeave={() => handleDigitalSteer(axis === 'x' ? 'stop-x' : 'stop-y')}
     >
         {icon}
     </button>
@@ -256,7 +278,7 @@ export const ControllerView: React.FC = () => {
                 </h2>
                 <div className="flex gap-4 justify-center text-xs font-mono text-slate-500">
                     <span>{debugInfo.orientation.toUpperCase()}</span>
-                    <span>TILT: {debugInfo.x}°</span>
+                    <span>TILT: {debugInfo.x.toFixed(0)}°</span>
                 </div>
             </div>
 
@@ -293,22 +315,27 @@ export const ControllerView: React.FC = () => {
             </div>
         </div>
       ) : (
-        /* === DIGITAL CONTROLLER UI === */
+        /* === DIGITAL CONTROLLER UI (Full 4-Way D-Pad) === */
         <div className="flex-1 flex flex-row items-end justify-between p-6 z-10 gap-4 pb-8 max-w-4xl mx-auto w-full">
             
-            {/* LEFT SIDE: D-Pad (Steering) */}
+            {/* LEFT SIDE: D-Pad (Steering & Vertical) */}
             <div className="w-48 h-48 grid grid-cols-3 grid-rows-3 gap-2">
+                {/* Row 1 */}
                 <div></div>
-                {/* UP/DOWN buttons removed for race steering simplicity */}
-                <div className='col-span-3 h-8'></div>
+                <DPadBtn dir="up" axis="y" icon={<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>} />
+                <div></div>
                 
-                <DPadBtn dir="left" icon={<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>} />
+                {/* Row 2 */}
+                <DPadBtn dir="left" axis="x" icon={<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>} />
                 <div className="flex items-center justify-center rounded-full bg-slate-900/50 border border-slate-700">
                     <div className="w-2 h-2 rounded-full bg-slate-500"></div>
                 </div>
-                <DPadBtn dir="right" icon={<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>} />
+                <DPadBtn dir="right" axis="x" icon={<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>} />
                 
-                <div className='col-span-3 h-8'></div>
+                {/* Row 3 */}
+                <div></div>
+                <DPadBtn dir="down" axis="y" icon={<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14"/><path d="M19 12l-7 7-7-7"/></svg>} />
+                <div></div>
             </div>
 
             {/* RIGHT SIDE: Action Buttons */}
