@@ -10,14 +10,19 @@ export const ControllerView: React.FC = () => {
   const [permissionGranted, setPermissionGranted] = useState(false);
   const [error, setError] = useState<string>('');
   const [isBoosting, setIsBoosting] = useState(false);
-  const [debugInfo, setDebugInfo] = useState({ x: 0, orientation: 'portrait' });
   const [controlMode, setControlMode] = useState<ControlMode>('motion');
   
-  // Track initial offset to "Zero" the steering when we start
-  const baseOffset = useRef({ x: 0, set: false });
+  // State for Visual Feedback
+  const [debugInfo, setDebugInfo] = useState({ x: 0, y: 0, orientation: 'portrait' });
+  
+  // Track initial offset for Gyro calibration
+  const baseOffset = useRef({ x: 0, y: 0, set: false });
 
-  // Track digital input state (0 for stop, -60 for left, 60 for right)
-  const digitalState = useRef({ x: 0 });
+  // State for Touch Input (Refs for mutable state in the loop)
+  const touchInput = useRef({
+    left: false,
+    right: false,
+  });
 
   const requestAccess = async () => {
     if (typeof (DeviceOrientationEvent as any).requestPermission === 'function') {
@@ -36,65 +41,59 @@ export const ControllerView: React.FC = () => {
     }
   };
 
+  // --- GYRO LOGIC ---
   const handleOrientation = useCallback((event: DeviceOrientationEvent) => {
-    if (!roomId || controlMode === 'touch') return;
+    if (!roomId || controlMode !== 'motion') return;
     
-    // Check screen width to determine orientation
     const isLandscape = window.innerWidth > window.innerHeight;
     
     let rawX = 0;
     let rawY = 0;
     let currentOrientation: 'portrait' | 'landscape' = isLandscape ? 'landscape' : 'portrait';
 
+    // Sensor Values
+    const gamma = event.gamma || 0; // Left/Right Roll
+    const beta = event.beta || 0;   // Front/Back Pitch
+    
     if (isLandscape) {
-        // LANDSCAPE MODE (Steering Wheel)
-        // Beta is the axis for front/back tilt (pitch).
-        // Gamma is the axis for left/right roll.
+        // LANDSCAPE (Steering Wheel): Use Beta for steering (X). Gamma for vertical (Y).
+        rawX = beta; 
+        rawY = gamma;
         
-        // Use Beta for steering (like a wheel)
-        rawX = event.beta || 0;
-        rawY = event.gamma || 0;
-        
-        // Correct for 180-degree rotation if the phone is flipped (e.g., home button left vs right)
-        // This relies on the internal window.orientation API, which helps determine the exact rotation.
-        if (window.orientation === 90 || window.orientation === -90) {
-            // Standardizing the base X axis to be relative to the phone's frame
-            if (Math.abs(window.orientation) === 90) {
-                // When in landscape, we often want the axis flipped so tilting 'up' means 'center'
-                // This is a common fix for different browsers/OS
-                rawX = (window.orientation === 90) ? (event.beta || 0) : -(event.beta || 0);
-            }
-        }
+        // CRITICAL SIGN FIX: Invert Beta for natural steering wheel feel (push away = negative/left)
+        rawX = rawX * -1;
     } else {
-        // PORTRAIT MODE (TV Remote)
-        rawX = event.gamma || 0;
-        rawY = event.beta || 0;
+        // PORTRAIT (Remote): Use Gamma for steering (X). Beta for vertical (Y).
+        rawX = gamma;
+        rawY = beta;
     }
 
-    // --- SENSOR DATA CLEANUP AND CALIBRATION ---
-    
     // 1. AUTO-CALIBRATION
-    if (!baseOffset.current.set && rawX !== 0) {
+    if (!baseOffset.current.set && Math.abs(rawX) > 1) {
         baseOffset.current.x = rawX;
+        baseOffset.current.y = rawY;
         baseOffset.current.set = true;
     }
 
     // 2. Apply Calibration & Drift Correction (Decay Offset)
     if (baseOffset.current.set) {
        baseOffset.current.x = baseOffset.current.x * 0.99; 
+       baseOffset.current.y = baseOffset.current.y * 0.99; 
        rawX -= baseOffset.current.x;
+       rawY -= baseOffset.current.y;
     }
-
-    // 3. Clamp values (-60 to 60 degrees)
+    
+    // 3. Clamp values (-60 to 60 degrees is safe for input range)
+    // Removed rounding to keep precision
     const x = Math.min(Math.max(rawX, -60), 60); 
     const y = Math.min(Math.max(rawY, -60), 60);
 
-    setDebugInfo({ x: Math.round(x), orientation: currentOrientation });
+    setDebugInfo({ x: Math.round(x), y: Math.round(y), orientation: currentOrientation });
 
     sendControllerData(roomId, {
-      x: Math.round(x),
-      y: Math.round(y),
-      isBoosting,
+      x: x, // Send float value for precision
+      y: y, 
+      isBoosting: isBoosting, // Use local state for boost
       timestamp: Date.now()
     });
   }, [roomId, isBoosting, controlMode]);
@@ -106,39 +105,60 @@ export const ControllerView: React.FC = () => {
     }
     return () => {
       window.removeEventListener('deviceorientation', handleOrientation);
-      window.removeEventListener('orientationchange', () => { });
+      window.removeEventListener('orientationchange', () => {});
     };
-  }, [permissionGranted, handleOrientation, controlMode]);
+  }, [permissionGranted, handleOrientation, roomId, controlMode]);
 
-  // --- DIGITAL INPUT HANDLERS ---
-  const handleDigitalSteer = (direction: 'left' | 'right' | 'stop') => {
+
+  // --- TOUCH LOGIC LOOP (Runs constantly in touch mode) ---
+  useEffect(() => {
     if (controlMode !== 'touch' || !roomId) return;
 
-    let targetX = 0;
-    // Set targetX to max tilt value (60) if pressing left/right
-    if (direction === 'left') targetX = -60;
-    if (direction === 'right') targetX = 60;
-    // If 'stop', targetX remains 0
+    const interval = setInterval(() => {
+      const { left, right } = touchInput.current;
+      
+      let x = 0;
+      const MAX_DIGITAL_TILT = 60; // Max signal sent for digital press
 
-    digitalState.current.x = targetX;
-    
-    // Update visual debug
-    setDebugInfo(prev => ({ ...prev, x: targetX }));
+      // Steering (X)
+      if (left) x = -MAX_DIGITAL_TILT;
+      if (right) x = MAX_DIGITAL_TILT;
+      
+      // Y axis is always 0 in digital steering mode (we assume the game handles acceleration via boost/W)
+      const y = 0; 
 
-    // Send data (send immediately on press/release for responsiveness)
-    sendControllerData(roomId, {
-        x: targetX,
-        y: 0,
-        isBoosting,
+      sendControllerData(roomId, {
+        x, // -60, 0, or 60
+        y, 
+        isBoosting: isBoosting,
         timestamp: Date.now()
-    });
+      });
+
+      setDebugInfo(prev => ({ x, y, orientation: 'touch' }));
+
+    }, 50); // Send updates every 50ms (20fps)
+
+    return () => clearInterval(interval);
+  }, [controlMode, roomId, isBoosting]);
+
+  const handleDigitalSteer = (direction: 'left' | 'right' | 'stop') => {
+      if (direction === 'stop') {
+          touchInput.current.left = false;
+          touchInput.current.right = false;
+      } else if (direction === 'left') {
+          touchInput.current.left = true;
+          touchInput.current.right = false;
+      } else if (direction === 'right') {
+          touchInput.current.right = true;
+          touchInput.current.left = false;
+      }
   };
 
   const handleBoostStart = () => {
       setIsBoosting(true);
+      // Immediately send the boost signal to override throttle for responsiveness
       if (roomId) {
-        const currentX = controlMode === 'touch' ? digitalState.current.x : debugInfo.x;
-        // Send immediate update to overcome throttling in the service layer
+        const currentX = controlMode === 'touch' ? (touchInput.current.left ? -60 : (touchInput.current.right ? 60 : 0)) : debugInfo.x;
         sendControllerData(roomId, {
             x: currentX,
             y: 0,
@@ -150,10 +170,11 @@ export const ControllerView: React.FC = () => {
 
   const handleBoostEnd = () => {
       setIsBoosting(false);
-      // Send immediate update for release
+      // Immediately send the boost signal OFF
       if (roomId) {
+          const currentX = controlMode === 'touch' ? (touchInput.current.left ? -60 : (touchInput.current.right ? 60 : 0)) : debugInfo.x;
           sendControllerData(roomId, {
-              x: digitalState.current.x,
+              x: currentX,
               y: 0,
               isBoosting: false,
               timestamp: Date.now()
@@ -163,6 +184,9 @@ export const ControllerView: React.FC = () => {
 
   const recalibrate = () => { baseOffset.current.set = false; };
 
+  // --- UI RENDERERS ---
+  const isHttp = window.location.protocol === 'http:' && window.location.hostname !== 'localhost';
+  if (isHttp) return <div className="p-8 text-white">Please use HTTPS</div>;
   if (!roomId) return <div className="p-8 text-white">Invalid Room ID</div>;
 
   if (!permissionGranted) {
@@ -178,23 +202,38 @@ export const ControllerView: React.FC = () => {
     );
   }
 
+  // Helper for D-Pad Buttons
+  const DPadBtn = ({ dir, icon, className = "" }: { dir: 'left' | 'right', icon: React.ReactNode, className?: string }) => (
+    <button
+        className={`bg-slate-800 border-2 border-slate-600 rounded-xl active:bg-cyan-600 active:border-cyan-400 active:text-white text-slate-400 transition-colors flex items-center justify-center shadow-lg active:scale-95 ${className}`}
+        onTouchStart={(e) => { e.preventDefault(); handleDigitalSteer(dir); }}
+        onTouchEnd={(e) => { e.preventDefault(); handleDigitalSteer('stop'); }}
+        onMouseDown={() => handleDigitalSteer(dir)}
+        onMouseUp={() => handleDigitalSteer('stop')}
+        onMouseLeave={() => handleDigitalSteer('stop')}
+    >
+        {icon}
+    </button>
+  );
+
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col relative overflow-hidden select-none touch-none">
       
-      {/* Mode Switcher */}
-      <div className="absolute top-4 left-0 right-0 flex justify-center z-50">
-          <div className="bg-slate-900/90 p-1 rounded-lg border border-slate-700 flex">
+      {/* Top Bar */}
+      <div className="absolute top-0 w-full p-4 flex justify-end items-center bg-slate-900/80 border-b border-slate-800 z-20 backdrop-blur-md">
+          {/* Toggle Switch */}
+          <div className="flex bg-slate-800 rounded-lg p-1 gap-1">
               <button 
                   onClick={() => setControlMode('motion')}
-                  className={`px-4 py-2 rounded text-xs font-bold transition-all ${controlMode === 'motion' ? 'bg-cyan-500 text-black' : 'text-slate-400'}`}
+                  className={`px-3 py-1 rounded text-xs font-bold transition-all ${controlMode === 'motion' ? 'bg-cyan-600 text-white shadow' : 'text-slate-400'}`}
               >
                   MOTION
               </button>
               <button 
                   onClick={() => setControlMode('touch')}
-                  className={`px-4 py-2 rounded text-xs font-bold transition-all ${controlMode === 'touch' ? 'bg-cyan-500 text-black' : 'text-slate-400'}`}
+                  className={`px-3 py-1 rounded text-xs font-bold transition-all ${controlMode === 'touch' ? 'bg-cyan-600 text-white shadow' : 'text-slate-400'}`}
               >
-                  TOUCH
+                  GAMEPAD
               </button>
           </div>
       </div>
@@ -255,36 +294,28 @@ export const ControllerView: React.FC = () => {
         </div>
       ) : (
         /* === DIGITAL CONTROLLER UI === */
-        <div className="flex-1 flex flex-row items-center justify-between p-4 z-10 gap-4">
+        <div className="flex-1 flex flex-row items-end justify-between p-6 z-10 gap-4 pb-8 max-w-4xl mx-auto w-full">
             
-            {/* D-PAD Area */}
-            {/* We use grid/flex here to keep buttons large for touch targets */}
-            <div className="flex-1 flex gap-2 h-full items-center justify-center max-w-[50%]">
-                <button
-                    className="flex-1 h-32 bg-slate-800/80 border-2 border-slate-600 rounded-l-2xl active:bg-cyan-500 active:text-black active:border-cyan-400 transition-colors flex items-center justify-center shadow-xl shadow-slate-900/50"
-                    onTouchStart={() => handleDigitalSteer('left')}
-                    onTouchEnd={() => handleDigitalSteer('stop')}
-                    onMouseDown={() => handleDigitalSteer('left')}
-                    onMouseUp={() => handleDigitalSteer('stop')}
-                >
-                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
-                </button>
-                <button
-                    className="flex-1 h-32 bg-slate-800/80 border-2 border-slate-600 rounded-r-2xl active:bg-cyan-500 active:text-black active:border-cyan-400 transition-colors flex items-center justify-center shadow-xl shadow-slate-900/50"
-                    onTouchStart={() => handleDigitalSteer('right')}
-                    onTouchEnd={() => handleDigitalSteer('stop')}
-                    onMouseDown={() => handleDigitalSteer('right')}
-                    onMouseUp={() => handleDigitalSteer('stop')}
-                >
-                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6"/></svg>
-                </button>
+            {/* LEFT SIDE: D-Pad (Steering) */}
+            <div className="w-48 h-48 grid grid-cols-3 grid-rows-3 gap-2">
+                <div></div>
+                {/* UP/DOWN buttons removed for race steering simplicity */}
+                <div className='col-span-3 h-8'></div>
+                
+                <DPadBtn dir="left" icon={<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>} />
+                <div className="flex items-center justify-center rounded-full bg-slate-900/50 border border-slate-700">
+                    <div className="w-2 h-2 rounded-full bg-slate-500"></div>
+                </div>
+                <DPadBtn dir="right" icon={<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>} />
+                
+                <div className='col-span-3 h-8'></div>
             </div>
 
-            {/* Action Buttons Area */}
-            <div className="flex-1 flex items-center justify-center h-full max-w-[40%]">
-                <button
+            {/* RIGHT SIDE: Action Buttons */}
+            <div className="flex flex-col gap-4 w-40 h-48 justify-end items-end">
+                <button 
                     className={`
-                        w-full h-32 rounded-2xl font-black text-2xl tracking-tighter transition-all duration-75 border-4 shadow-xl
+                        w-full h-24 rounded-2xl font-black text-2xl tracking-widest transition-all duration-75 border-4 shadow-xl
                         flex flex-col items-center justify-center
                         ${isBoosting 
                             ? 'bg-orange-500 border-orange-400 text-black scale-95 shadow-[0_0_30px_#f97316]' 
@@ -301,6 +332,11 @@ export const ControllerView: React.FC = () => {
             </div>
         </div>
       )}
+      
+      <div className="p-4 bg-slate-900 border-t border-slate-800 text-center z-20">
+          <p className="text-xs text-slate-500 font-mono">ROOM: {roomId} | MODE: {controlMode.toUpperCase()}</p>
+      </div>
+
     </div>
   );
 };
