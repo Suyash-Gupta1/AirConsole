@@ -95,21 +95,6 @@ const firebaseConfig = {
 If successful, you can now click "HOST A GAME" and scan the QR code!
 
 
-// Import the functions you need from the SDKs you need
-import { initializeApp } from "firebase/app";
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
-
-// Your web app's Firebase configuration
-const DEFAULT_CONFIG: FirebaseConfig = {
-  apiKey: "AIzaSyDHUDVReOWGhKwTy9KoAiHHHCrGSQKJPfI",
-  authDomain: "airconsole-1ce52.firebaseapp.com",
-  databaseURL: "https://airconsole-1ce52-default-rtdb.firebaseio.com",
-  projectId: "airconsole-1ce52",
-  storageBucket: "airconsole-1ce52.firebasestorage.app",
-  messagingSenderId: "14111851032",
-  appId: "1:14111851032:web:259d11fe31a626e570796d"
-};
 
 
 // Initialize Firebase
